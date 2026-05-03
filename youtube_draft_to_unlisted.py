@@ -83,6 +83,29 @@ async def robust_click(locator):
     )
 
 
+async def click_by_locator_box(page, locator):
+    box = await locator.bounding_box()
+    if not box:
+        return False
+    await page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    return True
+
+
+async def wait_hidden(locator, timeout=2500):
+    try:
+        await locator.wait_for(state="hidden", timeout=timeout)
+        return True
+    except PlaywrightTimeoutError:
+        return False
+
+
+async def press_tab_enter(page, tab_count=1):
+    for _ in range(tab_count):
+        await page.keyboard.press("Tab")
+        await asyncio.sleep(0.2)
+    await page.keyboard.press("Enter")
+
+
 async def goto_with_wait(page, url):
     await page.goto(url)
     try:
@@ -253,20 +276,28 @@ async def add_private_share_emails(page):
         print("  非公開共有ダイアログの完了ボタンが見つかりません")
         return False
 
-    await robust_click(done_button)
-    try:
-        await dialog.wait_for(state="hidden", timeout=7000)
-    except PlaywrightTimeoutError:
-        await page.keyboard.press("Enter")
+    close_attempts = [
+        ("ボタンを強制クリック", lambda: robust_click(done_button)),
+        ("ボタン中央を座標クリック", lambda: click_by_locator_box(page, done_button)),
+        ("Enter", lambda: page.keyboard.press("Enter")),
+        ("Tab -> Enter", lambda: press_tab_enter(page, tab_count=1)),
+        ("Tab x2 -> Enter", lambda: press_tab_enter(page, tab_count=2)),
+        ("Tab x3 -> Enter", lambda: press_tab_enter(page, tab_count=3)),
+    ]
+    for label, action in close_attempts:
+        print(f"  非公開共有ダイアログを閉じる試行: {label}")
         try:
-            await dialog.wait_for(state="hidden", timeout=7000)
+            await action()
         except PlaywrightTimeoutError:
-            print("  非公開共有ダイアログを閉じたことを確認できません")
-            return False
+            pass
+        await asyncio.sleep(1)
+        if await wait_hidden(dialog, timeout=2500):
+            await asyncio.sleep(1)
+            print("  非公開共有ダイアログを閉じました")
+            return True
 
-    await asyncio.sleep(1)
-    print("  非公開共有ダイアログを閉じました")
-    return True
+    print("  非公開共有ダイアログを閉じたことを確認できません")
+    return False
 
 
 async def save_changes(page):

@@ -106,6 +106,45 @@ async def press_tab_enter(page, tab_count=1):
     await page.keyboard.press("Enter")
 
 
+async def focused_text(page):
+    return await page.evaluate(
+        """() => {
+            const element = document.activeElement;
+            if (!element) return '';
+            return [
+                element.innerText,
+                element.textContent,
+                element.getAttribute('aria-label'),
+                element.getAttribute('id'),
+            ].filter(Boolean).join(' ');
+        }"""
+    )
+
+
+async def press_tabs_then_key_if_done(page, tab_count, key):
+    for _ in range(tab_count):
+        await page.keyboard.press("Tab")
+        await asyncio.sleep(0.2)
+
+    text = await focused_text(page)
+    print(f"    フォーカス中: {text[:80]}")
+    if "キャンセル" in text:
+        print("    キャンセルにフォーカスしているため押しません")
+        return False
+    if "完了" not in text and "保存" not in text and "done-button" not in text:
+        print("    完了/保存ではないため押しません")
+        return False
+
+    await page.keyboard.press(key)
+    return True
+
+
+async def focus_locator_then_key(page, locator, key):
+    await locator.evaluate("(element) => element.focus()")
+    await asyncio.sleep(0.2)
+    await page.keyboard.press(key)
+
+
 async def goto_with_wait(page, url):
     await page.goto(url)
     try:
@@ -279,10 +318,14 @@ async def add_private_share_emails(page):
     close_attempts = [
         ("ボタンを強制クリック", lambda: robust_click(done_button)),
         ("ボタン中央を座標クリック", lambda: click_by_locator_box(page, done_button)),
+        ("done-buttonへフォーカス -> Space", lambda: focus_locator_then_key(page, done_button, "Space")),
+        ("done-buttonへフォーカス -> Enter", lambda: focus_locator_then_key(page, done_button, "Enter")),
         ("Enter", lambda: page.keyboard.press("Enter")),
         ("Tab -> Enter", lambda: press_tab_enter(page, tab_count=1)),
         ("Tab x2 -> Enter", lambda: press_tab_enter(page, tab_count=2)),
         ("Tab x3 -> Enter", lambda: press_tab_enter(page, tab_count=3)),
+        ("Tab x3 -> Space", lambda: press_tabs_then_key_if_done(page, tab_count=3, key="Space")),
+        ("Tab x4 -> Space", lambda: press_tabs_then_key_if_done(page, tab_count=4, key="Space")),
     ]
     for label, action in close_attempts:
         print(f"  非公開共有ダイアログを閉じる試行: {label}")

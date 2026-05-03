@@ -73,7 +73,14 @@ async def robust_click(locator):
     except PlaywrightTimeoutError:
         pass
 
-    await locator.evaluate("(element) => element.click()")
+    await locator.evaluate(
+        """(element) => {
+            const clickable = element.querySelector(
+                'button, tp-yt-paper-button, paper-button, #button'
+            ) || element;
+            clickable.click();
+        }"""
+    )
 
 
 async def goto_with_wait(page, url):
@@ -229,9 +236,10 @@ async def add_private_share_emails(page):
         await asyncio.sleep(0.7)
         print(f"  共有先を追加: {email}")
 
-    done_clicked = await click_first_visible(
+    done_button = await first_visible(
         dialog,
         [
+            "ytcp-button#done-button",
             "ytcp-button:has-text('完了')",
             "ytcp-button:has-text('保存')",
             "button:has-text('完了')",
@@ -241,8 +249,23 @@ async def add_private_share_emails(page):
         ],
         timeout=3000,
     )
-    if done_clicked:
-        await asyncio.sleep(1)
+    if not done_button:
+        print("  非公開共有ダイアログの完了ボタンが見つかりません")
+        return False
+
+    await robust_click(done_button)
+    try:
+        await dialog.wait_for(state="hidden", timeout=7000)
+    except PlaywrightTimeoutError:
+        await page.keyboard.press("Enter")
+        try:
+            await dialog.wait_for(state="hidden", timeout=7000)
+        except PlaywrightTimeoutError:
+            print("  非公開共有ダイアログを閉じたことを確認できません")
+            return False
+
+    await asyncio.sleep(1)
+    print("  非公開共有ダイアログを閉じました")
     return True
 
 
@@ -251,22 +274,23 @@ async def save_changes(page):
         page,
         [
             "ytcp-button#save-button",
+            "ytcp-uploads-dialog ytcp-button#done-button:has-text('保存')",
             "ytcp-button:has-text('保存')",
             "button[aria-label*='保存']",
             "button:has-text('保存')",
-            "text=保存",
         ],
         timeout=4000,
     )
     if not save_btn:
+        print("  最終保存ボタンが見つかりません")
         return False
 
     await robust_click(save_btn)
+    print("  最終保存ボタンをクリックしました")
     try:
         await page.wait_for_load_state("networkidle", timeout=15000)
     except PlaywrightTimeoutError:
         pass
-    await asyncio.sleep(3)
 
     saved_signal = await first_visible(
         page,
@@ -276,9 +300,22 @@ async def save_changes(page):
             "text=動画を保存しました",
             "text=保存済み",
         ],
-        timeout=2500,
+        timeout=8000,
     )
-    return saved_signal is not None
+    if saved_signal:
+        return True
+
+    try:
+        await save_btn.wait_for(state="hidden", timeout=5000)
+        return True
+    except PlaywrightTimeoutError:
+        pass
+
+    disabled = await save_btn.get_attribute("aria-disabled")
+    if disabled == "true":
+        return True
+
+    return False
 
 
 async def confirm_saved_on_list(page, channel_id, title):

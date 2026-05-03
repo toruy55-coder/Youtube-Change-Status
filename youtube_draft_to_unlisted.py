@@ -56,8 +56,24 @@ async def click_first_visible(page_or_locator, selectors, timeout=2500):
     locator = await first_visible(page_or_locator, selectors, timeout=timeout)
     if not locator:
         return False
-    await locator.click()
+    await robust_click(locator)
     return True
+
+
+async def robust_click(locator):
+    try:
+        await locator.click(timeout=7000)
+        return
+    except PlaywrightTimeoutError:
+        pass
+
+    try:
+        await locator.click(force=True, timeout=7000)
+        return
+    except PlaywrightTimeoutError:
+        pass
+
+    await locator.evaluate("(element) => element.click()")
 
 
 async def goto_with_wait(page, url):
@@ -135,7 +151,7 @@ async def choose_private(page):
     if not private_radio:
         return False
 
-    await private_radio.click()
+    await robust_click(private_radio)
     await asyncio.sleep(1)
     return True
 
@@ -201,7 +217,7 @@ async def add_private_share_emails(page):
 
     for email in PRIVATE_SHARE_EMAILS:
         if email_input:
-            await email_input.click()
+            await robust_click(email_input)
             try:
                 await email_input.fill(email)
             except PlaywrightTimeoutError:
@@ -245,7 +261,7 @@ async def save_changes(page):
     if not save_btn:
         return False
 
-    await save_btn.click()
+    await robust_click(save_btn)
     try:
         await page.wait_for_load_state("networkidle", timeout=15000)
     except PlaywrightTimeoutError:

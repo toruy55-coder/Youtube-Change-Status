@@ -161,31 +161,60 @@ async def open_private_share_dialog(page):
 
 
 async def add_private_share_emails(page):
+    dialog = await first_visible(
+        page,
+        [
+            "div[role='dialog']:has-text('動画を非公開で共有')",
+            "tp-yt-paper-dialog:has-text('動画を非公開で共有')",
+            "ytcp-dialog:has-text('動画を非公開で共有')",
+            "paper-dialog:has-text('動画を非公開で共有')",
+            "div[role='dialog']:has-text('招待するユーザー')",
+            "tp-yt-paper-dialog:has-text('招待するユーザー')",
+        ],
+        timeout=5000,
+    )
+    if not dialog:
+        print("  非公開共有ダイアログ本体が見つかりません")
+        return False
+
     input_selectors = [
         "input[type='email']",
+        "input[aria-label*='招待']",
         "input[aria-label*='メール']",
         "input[aria-label*='email']",
+        "textarea[aria-label*='招待']",
         "textarea[aria-label*='メール']",
         "textarea[aria-label*='email']",
         "[contenteditable='true']",
-        "input",
         "textarea",
+        "input",
     ]
 
-    email_input = await first_visible(page, input_selectors, timeout=5000)
+    email_input = await first_visible(dialog, input_selectors, timeout=2500)
     if not email_input:
-        print("  共有メール入力欄が見つかりません")
-        return False
+        invite_label = dialog.locator("text=招待するユーザー").first
+        try:
+            await invite_label.click(timeout=2000)
+        except PlaywrightTimeoutError:
+            pass
+        print("  入力欄を直接特定できないため、現在フォーカス中の招待欄に入力します")
 
     for email in PRIVATE_SHARE_EMAILS:
-        await email_input.click()
-        await email_input.fill(email)
+        if email_input:
+            await email_input.click()
+            try:
+                await email_input.fill(email)
+            except PlaywrightTimeoutError:
+                await page.keyboard.press("Meta+A")
+                await page.keyboard.type(email)
+        else:
+            await page.keyboard.type(email)
         await page.keyboard.press("Enter")
         await asyncio.sleep(0.7)
         print(f"  共有先を追加: {email}")
 
     done_clicked = await click_first_visible(
-        page,
+        dialog,
         [
             "ytcp-button:has-text('完了')",
             "ytcp-button:has-text('保存')",

@@ -42,6 +42,14 @@ python3 youtube_draft_to_unlisted.py --limit 1
 python3 youtube_draft_to_unlisted.py --skip-confirm
 ```
 
+既に「非公開」になった動画も共有先設定の対象にする復旧モード:
+
+```bash
+python3 youtube_draft_to_unlisted.py --include-private --test
+```
+
+前回の処理で「非公開にはなったが共有先メールが保存されなかった」動画を直す場合に使います。
+
 ## 共有先 Google アカウント
 
 非公開動画は以下の5アカウントに共有します。
@@ -71,6 +79,7 @@ python3 youtube_draft_to_unlisted.py --skip-confirm
              └─ /channel/{id}/videos へ移動
                  └─ ytcp-video-row を取得
                      └─ 行テキストに「ドラフト」が含まれる行を検出
+                         └─ --include-private 指定時は「非公開」の行も対象
                          └─ 「ドラフトを編集」をクリック
                              └─ 公開設定タブへ移動
                                  └─ 「非公開」を選択
@@ -93,6 +102,10 @@ python3 youtube_draft_to_unlisted.py --skip-confirm
 ### テストモード
 
 `--test` は `--limit 1` と同じです。YouTube Studio の画面構成は変わることがあるため、セレクター修正後はまず1本だけ処理して確認してください。
+
+### 復旧モード
+
+`--include-private` を指定すると、ドラフト動画だけでなく、既に「非公開」になっている動画も処理対象にします。途中失敗で「非公開」だけ保存され、共有先メールが保存されなかった動画を修正するためのモードです。
 
 ## セレクター方針
 

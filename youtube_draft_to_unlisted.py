@@ -38,6 +38,11 @@ def parse_args():
         action="store_true",
         help="起動後のEnter待ちをスキップします。",
     )
+    parser.add_argument(
+        "--include-private",
+        action="store_true",
+        help="ドラフトに加えて、既に非公開になった動画も共有先設定の対象にします。",
+    )
     return parser.parse_args()
 
 
@@ -88,6 +93,22 @@ async def click_by_locator_box(page, locator):
     if not box:
         return False
     await page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    return True
+
+
+async def click_dialog_invite_area(page, dialog):
+    box = await dialog.bounding_box()
+    if not box:
+        return False
+    await page.mouse.click(box["x"] + 48, box["y"] + 185)
+    return True
+
+
+async def click_dialog_done_button(page, dialog):
+    box = await dialog.bounding_box()
+    if not box:
+        return False
+    await page.mouse.click(box["x"] + box["width"] - 62, box["y"] + box["height"] - 38)
     return True
 
 
@@ -145,6 +166,24 @@ async def focus_locator_then_key(page, locator, key):
     await page.keyboard.press(key)
 
 
+async def dialog_contains_all_emails(dialog):
+    text = await dialog.evaluate(
+        """(element) => {
+            const values = [...element.querySelectorAll('input, textarea')]
+                .map((input) => input.value || '')
+                .join(' ');
+            return [element.innerText || '', element.textContent || '', values].join(' ');
+        }"""
+    )
+    missing = [email for email in PRIVATE_SHARE_EMAILS if email not in text]
+    if missing:
+        print("  共有先メールが画面上で確認できません:")
+        for email in missing:
+            print(f"    - {email}")
+        return False
+    return True
+
+
 async def goto_with_wait(page, url):
     await page.goto(url)
     try:
@@ -167,24 +206,31 @@ async def get_channel_id(page):
     return channel_id_match.group(1) if channel_id_match else None
 
 
-async def find_draft_row(page):
+async def find_target_row(page, include_private=False):
     rows = await page.query_selector_all("ytcp-video-row")
     print(f"動画行数: {len(rows)}")
 
     for row in rows:
         row_text = await row.inner_text()
-        if "ドラフト" in row_text:
+        is_draft = "ドラフト" in row_text
+        is_private = include_private and "非公開" in row_text
+        if is_draft or is_private:
             title_lines = [line.strip() for line in row_text.split("\n") if line.strip()]
             title = title_lines[1] if len(title_lines) > 1 else "不明"
-            return row, title
+            status = "ドラフト" if is_draft else "非公開"
+            return row, title, status
 
-    return None, None
+    return None, None, None
 
 
-async def open_draft_editor(row):
+async def open_video_editor(row):
     edit_btn = await row.query_selector("text=ドラフトを編集")
     if not edit_btn:
         edit_btn = await row.query_selector("a[href*='video_id']")
+    if not edit_btn:
+        edit_btn = await row.query_selector("a[href*='/video/']")
+    if not edit_btn:
+        edit_btn = await row.query_selector("a")
     if not edit_btn:
         return False
     await edit_btn.click()
@@ -277,12 +323,10 @@ async def add_private_share_emails(page):
 
     email_input = await first_visible(dialog, input_selectors, timeout=2500)
     if not email_input:
-        invite_label = dialog.locator("text=招待するユーザー").first
-        try:
-            await invite_label.click(timeout=2000)
-        except PlaywrightTimeoutError:
-            pass
-        print("  入力欄を直接特定できないため、現在フォーカス中の招待欄に入力します")
+        if not await click_dialog_invite_area(page, dialog):
+            print("  共有メール入力欄が見つかりません")
+            return False
+        print("  入力欄を直接特定できないため、招待欄の中央付近をクリックして入力します")
 
     for email in PRIVATE_SHARE_EMAILS:
         if email_input:
@@ -297,6 +341,10 @@ async def add_private_share_emails(page):
         await page.keyboard.press("Enter")
         await asyncio.sleep(0.7)
         print(f"  共有先を追加: {email}")
+
+    await asyncio.sleep(1)
+    if not await dialog_contains_all_emails(dialog):
+        return False
 
     done_button = await first_visible(
         dialog,
@@ -316,16 +364,9 @@ async def add_private_share_emails(page):
         return False
 
     close_attempts = [
-        ("ボタンを強制クリック", lambda: robust_click(done_button)),
-        ("ボタン中央を座標クリック", lambda: click_by_locator_box(page, done_button)),
-        ("done-buttonへフォーカス -> Space", lambda: focus_locator_then_key(page, done_button, "Space")),
-        ("done-buttonへフォーカス -> Enter", lambda: focus_locator_then_key(page, done_button, "Enter")),
-        ("Enter", lambda: page.keyboard.press("Enter")),
-        ("Tab -> Enter", lambda: press_tab_enter(page, tab_count=1)),
-        ("Tab x2 -> Enter", lambda: press_tab_enter(page, tab_count=2)),
-        ("Tab x3 -> Enter", lambda: press_tab_enter(page, tab_count=3)),
-        ("Tab x3 -> Space", lambda: press_tabs_then_key_if_done(page, tab_count=3, key="Space")),
-        ("Tab x4 -> Space", lambda: press_tabs_then_key_if_done(page, tab_count=4, key="Space")),
+        ("右下の完了ボタンを座標クリック", lambda: click_dialog_done_button(page, dialog)),
+        ("完了ボタン中央を座標クリック", lambda: click_by_locator_box(page, done_button)),
+        ("完了ボタンを強制クリック", lambda: robust_click(done_button)),
     ]
     for label, action in close_attempts:
         print(f"  非公開共有ダイアログを閉じる試行: {label}")
@@ -407,13 +448,13 @@ async def confirm_saved_on_list(page, channel_id, title):
     return False
 
 
-async def process_one_draft(page, channel_id):
-    row, title = await find_draft_row(page)
+async def process_one_video(page, channel_id, include_private=False):
+    row, title, status = await find_target_row(page, include_private=include_private)
     if not row:
-        return False, None, "no_draft"
+        return False, None, "no_target"
 
-    print(f"  ドラフト検出: {title}")
-    if not await open_draft_editor(row):
+    print(f"  対象検出（{status}）: {title}")
+    if not await open_video_editor(row):
         return False, title, "edit_button_not_found"
 
     try:
@@ -491,8 +532,12 @@ async def main():
                 print(f"\nテスト/上限モードのため {processed} 本で停止しました。")
                 break
 
-            success, title, reason = await process_one_draft(page, channel_id)
-            if reason == "no_draft":
+            success, title, reason = await process_one_video(
+                page,
+                channel_id,
+                include_private=args.include_private,
+            )
+            if reason == "no_target":
                 break
 
             if success:

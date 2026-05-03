@@ -21,6 +21,12 @@ Run one draft only:
 python3 youtube_draft_to_unlisted.py --test
 ```
 
+Repair one already-private video whose share emails may not have been saved:
+
+```bash
+python3 youtube_draft_to_unlisted.py --include-private --test
+```
+
 Skip the account-confirmation Enter prompt only when the user explicitly wants unattended execution:
 
 ```bash
@@ -32,7 +38,7 @@ python3 youtube_draft_to_unlisted.py --skip-confirm
 1. Launch Chrome using the repository-local `chrome_profile/` session.
 2. Open YouTube Studio.
 3. Wait for the user to confirm the correct YouTube account in Terminal.
-4. Detect `ytcp-video-row` rows whose text contains `ドラフト`.
+4. Detect `ytcp-video-row` rows whose text contains `ドラフト`; with `--include-private`, also process rows containing `非公開`.
 5. Open `ドラフトを編集`.
 6. Move to `公開設定`.
 7. Select `非公開`.

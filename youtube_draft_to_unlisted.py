@@ -43,7 +43,7 @@ def parse_args():
 
 async def first_visible(page_or_locator, selectors, timeout=2500):
     for selector in selectors:
-        locator = page_or_locator.locator(selector).first()
+        locator = page_or_locator.locator(selector).first
         try:
             await locator.wait_for(state="visible", timeout=timeout)
             return locator

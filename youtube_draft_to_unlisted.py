@@ -10,6 +10,7 @@ CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 USER_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chrome_profile")
 
 PRIVATE_SHARE_EMAILS = [
+    "toruy55@gmail.com",
     "toruy56@gmail.com",
     "mei1218y@gmail.com",
     "m.reveson.mi@gmail.com",
@@ -687,7 +688,9 @@ async def main():
 
             if success:
                 processed += 1
-                print(f"✅ {processed}本目を非公開＋指定5アカウント共有に変更しました: {title}")
+                print(
+                    f"✅ {processed}本目を非公開＋指定{len(PRIVATE_SHARE_EMAILS)}アカウント共有に変更しました: {title}"
+                )
                 continue
 
             failures.append((title or "不明", reason))

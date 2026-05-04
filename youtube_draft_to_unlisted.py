@@ -127,7 +127,7 @@ async def press_tab_enter(page, tab_count=1):
     await page.keyboard.press("Enter")
 
 
-async def close_private_share_dialog_from_invite_field(page, dialog):
+async def close_private_share_dialog_from_invite_field(page, dialog, tab_count):
     email_input = await find_private_share_email_input(page, dialog)
     if email_input:
         await robust_click(email_input)
@@ -135,7 +135,7 @@ async def close_private_share_dialog_from_invite_field(page, dialog):
         return False
 
     await asyncio.sleep(0.3)
-    return await press_tabs_then_key_if_done(page, tab_count=3, key="Enter")
+    return await press_tabs_then_key_if_done(page, tab_count=tab_count, key="Enter")
 
 
 async def click_dialog_done_button_by_text(dialog):
@@ -508,7 +508,8 @@ async def add_private_share_emails(page):
 
     close_attempts = [
         ("完了ボタンを文字で探してクリック", lambda: click_dialog_done_button_by_text(dialog)),
-        ("招待欄にフォーカスしてTabを3回押してEnter（完了確認つき）", lambda: close_private_share_dialog_from_invite_field(page, dialog)),
+        ("招待欄にフォーカスしてTabを3回押してEnter（完了確認つき）", lambda: close_private_share_dialog_from_invite_field(page, dialog, 3)),
+        ("招待欄にフォーカスしてTabを4回押してEnter（完了確認つき）", lambda: close_private_share_dialog_from_invite_field(page, dialog, 4)),
         ("右下の完了ボタンを座標クリック", lambda: click_dialog_done_button(page, dialog)),
         ("完了ボタン中央を座標クリック", lambda: click_by_locator_box(page, done_button)),
         ("完了ボタンを強制クリック", lambda: robust_click(done_button)),

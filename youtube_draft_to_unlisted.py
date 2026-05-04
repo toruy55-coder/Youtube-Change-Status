@@ -16,6 +16,7 @@ PRIVATE_SHARE_EMAILS = [
     "rihoho1020@gmail.com",
     "memory.yoshie55@gmail.com",
 ]
+PRIVATE_SHARE_EMAIL_TEXT = ",\n".join(PRIVATE_SHARE_EMAILS)
 
 
 def parse_args():
@@ -41,7 +42,7 @@ def parse_args():
     parser.add_argument(
         "--include-private",
         action="store_true",
-        help="ドラフトに加えて、既に非公開になった動画も共有先設定の対象にします。",
+        help="現在は使用しません。非公開の動画は処理せず、ドラフトのみ対象にします。",
     )
     return parser.parse_args()
 
@@ -135,7 +136,8 @@ async def close_private_share_dialog_from_invite_field(page, dialog, tab_count):
         return False
 
     await asyncio.sleep(0.3)
-    return await press_tabs_then_key_if_done(page, tab_count=tab_count, key="Enter")
+    await press_tab_enter(page, tab_count=tab_count)
+    return True
 
 
 async def click_dialog_done_button_by_text(dialog):
@@ -413,13 +415,12 @@ async def find_private_share_email_input(page, dialog):
 
 
 async def add_all_share_emails_at_once(page, dialog, email_input):
-    email_text = ", ".join(PRIVATE_SHARE_EMAILS)
     await robust_click(email_input)
     try:
-        await email_input.fill(email_text, timeout=3000)
+        await email_input.fill(PRIVATE_SHARE_EMAIL_TEXT, timeout=3000)
     except PlaywrightTimeoutError:
         await page.keyboard.press("Meta+A")
-        await page.keyboard.type(email_text)
+        await page.keyboard.type(PRIVATE_SHARE_EMAIL_TEXT)
 
     await page.keyboard.press("Enter")
     await asyncio.sleep(1.5)
@@ -507,12 +508,7 @@ async def add_private_share_emails(page):
         return False
 
     close_attempts = [
-        ("完了ボタンを文字で探してクリック", lambda: click_dialog_done_button_by_text(dialog)),
-        ("招待欄にフォーカスしてTabを3回押してEnter（完了確認つき）", lambda: close_private_share_dialog_from_invite_field(page, dialog, 3)),
-        ("招待欄にフォーカスしてTabを4回押してEnter（完了確認つき）", lambda: close_private_share_dialog_from_invite_field(page, dialog, 4)),
-        ("右下の完了ボタンを座標クリック", lambda: click_dialog_done_button(page, dialog)),
-        ("完了ボタン中央を座標クリック", lambda: click_by_locator_box(page, done_button)),
-        ("完了ボタンを強制クリック", lambda: robust_click(done_button)),
+        ("招待欄にフォーカスしてTabを4回押してEnter", lambda: close_private_share_dialog_from_invite_field(page, dialog, 4)),
     ]
     for label, action in close_attempts:
         print(f"  非公開共有ダイアログを閉じる試行: {label}")
@@ -683,11 +679,9 @@ async def main():
                 print(f"\nテスト/上限モードのため {processed} 本で停止しました。")
                 break
 
-            success, title, reason = await process_one_video(
-                page,
-                channel_id,
-                include_private=args.include_private,
-            )
+            if args.include_private:
+                print("  --include-private は無視します。非公開動画は処理せず、ドラフトのみ対象にします。")
+            success, title, reason = await process_one_video(page, channel_id, include_private=False)
             if reason == "no_target":
                 break
 

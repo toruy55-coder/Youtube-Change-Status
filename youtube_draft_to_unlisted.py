@@ -135,8 +135,41 @@ async def close_private_share_dialog_from_invite_field(page, dialog):
         return False
 
     await asyncio.sleep(0.3)
-    await press_tab_enter(page, tab_count=3)
-    return True
+    return await press_tabs_then_key_if_done(page, tab_count=3, key="Enter")
+
+
+async def click_dialog_done_button_by_text(dialog):
+    return await dialog.evaluate(
+        """(root) => {
+            const isVisible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+            };
+            const clickElement = (element) => {
+                const inner = element.shadowRoot?.querySelector(
+                    'button, tp-yt-paper-button, paper-button, [role="button"]'
+                );
+                (inner || element).click();
+            };
+            const candidates = [
+                ...root.querySelectorAll('ytcp-button, tp-yt-paper-button, paper-button, button, [role="button"]'),
+            ];
+            for (const element of candidates) {
+                const label = [
+                    element.innerText,
+                    element.textContent,
+                    element.getAttribute('aria-label'),
+                    element.getAttribute('id'),
+                ].filter(Boolean).join(' ');
+                if ((label.includes('完了') || label.includes('保存')) && !label.includes('キャンセル') && isVisible(element)) {
+                    clickElement(element);
+                    return true;
+                }
+            }
+            return false;
+        }"""
+    )
 
 
 async def focused_text(page):
@@ -474,7 +507,8 @@ async def add_private_share_emails(page):
         return False
 
     close_attempts = [
-        ("招待欄にフォーカスしてTabを3回押してEnter", lambda: close_private_share_dialog_from_invite_field(page, dialog)),
+        ("完了ボタンを文字で探してクリック", lambda: click_dialog_done_button_by_text(dialog)),
+        ("招待欄にフォーカスしてTabを3回押してEnter（完了確認つき）", lambda: close_private_share_dialog_from_invite_field(page, dialog)),
         ("右下の完了ボタンを座標クリック", lambda: click_dialog_done_button(page, dialog)),
         ("完了ボタン中央を座標クリック", lambda: click_by_locator_box(page, done_button)),
         ("完了ボタンを強制クリック", lambda: robust_click(done_button)),
@@ -482,9 +516,12 @@ async def add_private_share_emails(page):
     for label, action in close_attempts:
         print(f"  非公開共有ダイアログを閉じる試行: {label}")
         try:
-            await action()
+            clicked = await action()
         except PlaywrightTimeoutError:
-            pass
+            clicked = False
+        if clicked is False:
+            print("    この方法では完了ボタンを押せませんでした")
+            continue
         await asyncio.sleep(1)
         if await wait_hidden(dialog, timeout=2500):
             await asyncio.sleep(1)

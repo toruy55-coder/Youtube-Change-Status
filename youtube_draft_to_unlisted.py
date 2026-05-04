@@ -45,6 +45,11 @@ def parse_args():
         action="store_true",
         help="現在は使用しません。非公開の動画は処理せず、ドラフトのみ対象にします。",
     )
+    parser.add_argument(
+        "--unlisted",
+        action="store_true",
+        help="非公開共有ではなく、限定公開にして保存します。",
+    )
     return parser.parse_args()
 
 
@@ -363,6 +368,25 @@ async def choose_private(page):
     return True
 
 
+async def choose_unlisted(page):
+    unlisted_radio = await first_visible(
+        page,
+        [
+            "tp-yt-paper-radio-button[name='UNLISTED']",
+            "[name='UNLISTED']",
+            "tp-yt-paper-radio-button:has-text('限定公開')",
+            "div[role='radio']:has-text('限定公開')",
+            "text=限定公開",
+        ],
+    )
+    if not unlisted_radio:
+        return False
+
+    await robust_click(unlisted_radio)
+    await asyncio.sleep(1)
+    return True
+
+
 async def open_private_share_dialog(page):
     opened = await click_first_visible(
         page,
@@ -579,13 +603,13 @@ async def save_changes(page):
     return False
 
 
-async def confirm_saved_on_list(page, channel_id, title):
+async def confirm_saved_on_list(page, channel_id, title, expected_visibility):
     await goto_with_wait(page, f"{YOUTUBE_STUDIO_URL}/channel/{channel_id}/videos")
     rows = await page.query_selector_all("ytcp-video-row")
     for row in rows:
         row_text = await row.inner_text()
         if title in row_text:
-            if "非公開" in row_text and "ドラフト" not in row_text:
+            if expected_visibility in row_text and "ドラフト" not in row_text:
                 return True
             print("  一覧で保存後ステータスを確認できませんでした。")
             print(f"  該当行: {row_text.replace(chr(10), ' | ')}")
@@ -594,7 +618,7 @@ async def confirm_saved_on_list(page, channel_id, title):
     return False
 
 
-async def process_one_video(page, channel_id, include_private=False):
+async def process_one_video(page, channel_id, include_private=False, unlisted=False):
     row, title, status = await find_target_row(page, include_private=include_private)
     if not row:
         return False, None, "no_target"
@@ -612,19 +636,25 @@ async def process_one_video(page, channel_id, include_private=False):
     if not await open_visibility_step(page):
         print("  公開設定タブが見つかりません。現在画面で非公開設定を直接探します。")
 
-    if not await choose_private(page):
-        return False, title, "private_radio_not_found"
-    print("  非公開を選択しました")
+    if unlisted:
+        if not await choose_unlisted(page):
+            return False, title, "unlisted_radio_not_found"
+        print("  限定公開を選択しました")
+    else:
+        if not await choose_private(page):
+            return False, title, "private_radio_not_found"
+        print("  非公開を選択しました")
 
-    if not await open_private_share_dialog(page):
-        return False, title, "private_share_dialog_not_found"
-    print("  非公開共有ダイアログを開きました")
+        if not await open_private_share_dialog(page):
+            return False, title, "private_share_dialog_not_found"
+        print("  非公開共有ダイアログを開きました")
 
-    if not await add_private_share_emails(page):
-        return False, title, "private_share_dialog_done_not_confirmed"
+        if not await add_private_share_emails(page):
+            return False, title, "private_share_dialog_done_not_confirmed"
 
     save_confirmed = await save_changes(page)
-    list_confirmed = await confirm_saved_on_list(page, channel_id, title)
+    expected_visibility = "限定公開" if unlisted else "非公開"
+    list_confirmed = await confirm_saved_on_list(page, channel_id, title, expected_visibility)
     if not save_confirmed:
         print("  保存完了メッセージは確認できませんでした。")
     if not list_confirmed:
@@ -682,15 +712,23 @@ async def main():
 
             if args.include_private:
                 print("  --include-private は無視します。非公開動画は処理せず、ドラフトのみ対象にします。")
-            success, title, reason = await process_one_video(page, channel_id, include_private=False)
+            success, title, reason = await process_one_video(
+                page,
+                channel_id,
+                include_private=False,
+                unlisted=args.unlisted,
+            )
             if reason == "no_target":
                 break
 
             if success:
                 processed += 1
-                print(
-                    f"✅ {processed}本目を非公開＋指定{len(PRIVATE_SHARE_EMAILS)}アカウント共有に変更しました: {title}"
-                )
+                if args.unlisted:
+                    print(f"✅ {processed}本目を限定公開に変更しました: {title}")
+                else:
+                    print(
+                        f"✅ {processed}本目を非公開＋指定{len(PRIVATE_SHARE_EMAILS)}アカウント共有に変更しました: {title}"
+                    )
                 continue
 
             failures.append((title or "不明", reason))

@@ -172,7 +172,13 @@ async def dialog_contains_all_emails(dialog):
             const values = [...element.querySelectorAll('input, textarea')]
                 .map((input) => input.value || '')
                 .join(' ');
-            return [element.innerText || '', element.textContent || '', values].join(' ');
+            const aria = [...element.querySelectorAll('[aria-label], [title]')]
+                .map((node) => [
+                    node.getAttribute('aria-label') || '',
+                    node.getAttribute('title') || '',
+                ].join(' '))
+                .join(' ');
+            return [element.innerText || '', element.textContent || '', values, aria].join(' ');
         }"""
     )
     missing = [email for email in PRIVATE_SHARE_EMAILS if email not in text]
@@ -291,6 +297,80 @@ async def open_private_share_dialog(page):
     return opened
 
 
+async def find_private_share_email_input(page, dialog):
+    label_candidates = [
+        "招待するユーザー",
+        "メールアドレス",
+        "ユーザー",
+    ]
+    for label in label_candidates:
+        try:
+            locator = page.get_by_label(label, exact=False).first
+            await locator.wait_for(state="visible", timeout=1200)
+            return locator
+        except PlaywrightTimeoutError:
+            pass
+
+    input_selectors = [
+        "input[aria-label='招待するユーザー']",
+        "textarea[aria-label='招待するユーザー']",
+        "input[aria-label*='招待']",
+        "input[aria-label*='メール']",
+        "input[aria-label*='email']",
+        "textarea[aria-label*='招待']",
+        "textarea[aria-label*='メール']",
+        "textarea[aria-label*='email']",
+        "ytcp-chip-bar input",
+        "ytcp-chip-bar textarea",
+        "[contenteditable='true']",
+        "textarea",
+        "input",
+    ]
+    return await first_visible(dialog, input_selectors, timeout=1200)
+
+
+async def add_all_share_emails_at_once(page, dialog, email_input):
+    email_text = ", ".join(PRIVATE_SHARE_EMAILS)
+    await robust_click(email_input)
+    try:
+        await email_input.fill(email_text, timeout=3000)
+    except PlaywrightTimeoutError:
+        await page.keyboard.press("Meta+A")
+        await page.keyboard.type(email_text)
+
+    await page.keyboard.press("Enter")
+    await asyncio.sleep(1)
+    if await dialog_contains_all_emails(dialog):
+        print("  共有先メールをまとめて追加しました")
+        return True
+
+    return False
+
+
+async def add_share_emails_one_by_one(page, dialog, email_input=None):
+    for email in PRIVATE_SHARE_EMAILS:
+        if email_input:
+            await robust_click(email_input)
+            try:
+                await email_input.fill(email, timeout=3000)
+            except PlaywrightTimeoutError:
+                await page.keyboard.press("Meta+A")
+                await page.keyboard.type(email)
+        else:
+            await page.keyboard.type(email)
+        await page.keyboard.press("Enter")
+        await asyncio.sleep(0.7)
+        print(f"  共有先を追加: {email}")
+
+        # YouTube Studio rebuilds the chip input after each Enter, so refresh it.
+        refreshed = await find_private_share_email_input(page, dialog)
+        if refreshed:
+            email_input = refreshed
+
+    await asyncio.sleep(1)
+    return await dialog_contains_all_emails(dialog)
+
+
 async def add_private_share_emails(page):
     dialog = await first_visible(
         page,
@@ -308,42 +388,22 @@ async def add_private_share_emails(page):
         print("  非公開共有ダイアログ本体が見つかりません")
         return False
 
-    input_selectors = [
-        "input[type='email']",
-        "input[aria-label*='招待']",
-        "input[aria-label*='メール']",
-        "input[aria-label*='email']",
-        "textarea[aria-label*='招待']",
-        "textarea[aria-label*='メール']",
-        "textarea[aria-label*='email']",
-        "[contenteditable='true']",
-        "textarea",
-        "input",
-    ]
-
-    email_input = await first_visible(dialog, input_selectors, timeout=2500)
+    email_input = await find_private_share_email_input(page, dialog)
     if not email_input:
         if not await click_dialog_invite_area(page, dialog):
             print("  共有メール入力欄が見つかりません")
             return False
         print("  入力欄を直接特定できないため、招待欄の中央付近をクリックして入力します")
 
-    for email in PRIVATE_SHARE_EMAILS:
-        if email_input:
-            await robust_click(email_input)
-            try:
-                await email_input.fill(email)
-            except PlaywrightTimeoutError:
-                await page.keyboard.press("Meta+A")
-                await page.keyboard.type(email)
-        else:
-            await page.keyboard.type(email)
-        await page.keyboard.press("Enter")
-        await asyncio.sleep(0.7)
-        print(f"  共有先を追加: {email}")
+    added = False
+    if email_input:
+        added = await add_all_share_emails_at_once(page, dialog, email_input)
 
-    await asyncio.sleep(1)
-    if not await dialog_contains_all_emails(dialog):
+    if not added:
+        print("  まとめて追加できないため、1件ずつ追加します")
+        added = await add_share_emails_one_by_one(page, dialog, email_input)
+
+    if not added:
         return False
 
     done_button = await first_visible(

@@ -127,6 +127,18 @@ async def press_tab_enter(page, tab_count=1):
     await page.keyboard.press("Enter")
 
 
+async def close_private_share_dialog_from_invite_field(page, dialog):
+    email_input = await find_private_share_email_input(page, dialog)
+    if email_input:
+        await robust_click(email_input)
+    elif not await click_dialog_invite_area(page, dialog):
+        return False
+
+    await asyncio.sleep(0.3)
+    await press_tab_enter(page, tab_count=3)
+    return True
+
+
 async def focused_text(page):
     return await page.evaluate(
         """() => {
@@ -462,6 +474,7 @@ async def add_private_share_emails(page):
         return False
 
     close_attempts = [
+        ("招待欄にフォーカスしてTabを3回押してEnter", lambda: close_private_share_dialog_from_invite_field(page, dialog)),
         ("右下の完了ボタンを座標クリック", lambda: click_dialog_done_button(page, dialog)),
         ("完了ボタン中央を座標クリック", lambda: click_by_locator_box(page, done_button)),
         ("完了ボタンを強制クリック", lambda: robust_click(done_button)),
@@ -573,7 +586,7 @@ async def process_one_video(page, channel_id, include_private=False):
     print("  非公開共有ダイアログを開きました")
 
     if not await add_private_share_emails(page):
-        return False, title, "share_email_input_not_found"
+        return False, title, "private_share_dialog_done_not_confirmed"
 
     save_confirmed = await save_changes(page)
     list_confirmed = await confirm_saved_on_list(page, channel_id, title)
@@ -609,8 +622,10 @@ async def main():
         print("共有先Googleアカウント:")
         for email in PRIVATE_SHARE_EMAILS:
             print(f"  - {email}")
-        print("YouTube Studio が表示され、正しいアカウントであることを確認したらEnterを押してください...")
-        if not args.skip_confirm:
+        if args.skip_confirm or args.test:
+            print("起動後のアカウント確認Enter待ちはスキップします。")
+        else:
+            print("YouTube Studio が表示され、正しいアカウントであることを確認したらEnterを押してください...")
             input()
 
         channel_id = await get_channel_id(page)

@@ -166,19 +166,57 @@ async def focus_locator_then_key(page, locator, key):
     await page.keyboard.press(key)
 
 
-async def dialog_contains_all_emails(dialog):
+async def dialog_contains_all_emails(page, dialog):
+    missing = []
+    for email in PRIVATE_SHARE_EMAILS:
+        found = False
+        locators = [
+            dialog.get_by_text(email, exact=True),
+            dialog.locator(f"text={email}"),
+            page.get_by_text(email, exact=True),
+            page.locator(f"text={email}"),
+        ]
+        for locator in locators:
+            try:
+                await locator.first.wait_for(state="visible", timeout=1000)
+                found = True
+                break
+            except PlaywrightTimeoutError:
+                pass
+        if not found:
+            missing.append(email)
+
+    if not missing:
+        return True
+
     text = await dialog.evaluate(
         """(element) => {
-            const values = [...element.querySelectorAll('input, textarea')]
-                .map((input) => input.value || '')
-                .join(' ');
-            const aria = [...element.querySelectorAll('[aria-label], [title]')]
-                .map((node) => [
-                    node.getAttribute('aria-label') || '',
-                    node.getAttribute('title') || '',
-                ].join(' '))
-                .join(' ');
-            return [element.innerText || '', element.textContent || '', values, aria].join(' ');
+            const seen = new Set();
+            const values = [];
+            const add = (value) => {
+                if (!value) return;
+                const normalized = String(value).trim();
+                if (normalized && !seen.has(normalized)) {
+                    seen.add(normalized);
+                    values.push(normalized);
+                }
+            };
+            const walk = (node) => {
+                if (!node) return;
+                add(node.innerText);
+                add(node.textContent);
+                add(node.value);
+                if (node.getAttribute) {
+                    add(node.getAttribute('aria-label'));
+                    add(node.getAttribute('title'));
+                }
+                if (node.shadowRoot) {
+                    for (const child of node.shadowRoot.children) walk(child);
+                }
+                for (const child of node.children || []) walk(child);
+            };
+            walk(element);
+            return values.join(' ');
         }"""
     )
     missing = [email for email in PRIVATE_SHARE_EMAILS if email not in text]
@@ -339,8 +377,8 @@ async def add_all_share_emails_at_once(page, dialog, email_input):
         await page.keyboard.type(email_text)
 
     await page.keyboard.press("Enter")
-    await asyncio.sleep(1)
-    if await dialog_contains_all_emails(dialog):
+    await asyncio.sleep(1.5)
+    if await dialog_contains_all_emails(page, dialog):
         print("  共有先メールをまとめて追加しました")
         return True
 
@@ -368,7 +406,7 @@ async def add_share_emails_one_by_one(page, dialog, email_input=None):
             email_input = refreshed
 
     await asyncio.sleep(1)
-    return await dialog_contains_all_emails(dialog)
+    return await dialog_contains_all_emails(page, dialog)
 
 
 async def add_private_share_emails(page):
